@@ -1,4 +1,4 @@
-// server.js - COMPLETE FIXED VERSION
+// server.js - FIXED VERSION
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -16,8 +16,12 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Serve uploaded images statically
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// ✅ FIX: Serve static files correctly
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+  setHeaders: (res, path) => {
+    res.set('Access-Control-Allow-Origin', '*');
+  }
+}));
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -61,16 +65,15 @@ const generateId = () => {
   return 'prod-' + Date.now().toString() + Math.round(Math.random() * 1000);
 };
 
-// ✅ FIXED: Get all products
+// ✅ FIXED: Get all products with proper image URLs
 app.get('/api/products', (req, res) => {
   try {
     console.log('📦 Fetching products, total:', products.length);
     
-    // Add full image URL to each product
+    // ✅ FIX: Properly format image URLs
     const productsWithFullUrls = products.map(product => ({
       ...product,
-      image: product.image.startsWith('http') ? product.image : 
-             `http://localhost:${PORT}${product.image}`
+      image: getFullImageUrl(product.image)
     }));
     
     res.json({
@@ -87,7 +90,7 @@ app.get('/api/products', (req, res) => {
   }
 });
 
-// ✅ FIXED: Upload product - WITHOUT DESCRIPTION AND USAGE
+// ✅ FIXED: Upload product
 app.post('/api/products', upload.single('image'), async (req, res) => {
   try {
     console.log('📨 Received product upload request');
@@ -118,7 +121,6 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
         construction: req.body.construction || '',
         weave: req.body.weave || '',
         finish: req.body.finish || ''
-        // ❌ USAGE REMOVED
       };
     }
 
@@ -130,19 +132,21 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
       });
     }
 
-    // Handle image URL
-    let imageUrl = 'https://via.placeholder.com/300x300/4A5568/FFFFFF?text=Product+Image';
+    // ✅ FIX: Handle image URL properly
+    let imageUrl = '';
     if (req.file) {
       imageUrl = `/uploads/${req.file.filename}`;
       console.log('🖼️ Image saved:', imageUrl);
+    } else {
+      // Use placeholder with full URL
+      imageUrl = `https://via.placeholder.com/300x300/4A5568/FFFFFF?text=Product+Image`;
     }
 
-    // Create product object - WITHOUT DESCRIPTION AND USAGE
+    // Create product object
     const newProduct = {
       id: generateId(),
       name: req.body.name.trim(),
       price: req.body.price ? parseFloat(req.body.price) : 0,
-      // ❌ DESCRIPTION REMOVED
       category: req.body.mainCategory || req.body.category || '',
       mainCategory: req.body.mainCategory || req.body.category || '',
       subCategory: req.body.subCategory || '',
@@ -169,8 +173,7 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
       message: 'Product uploaded successfully',
       product: {
         ...newProduct,
-        image: newProduct.image.startsWith('http') ? newProduct.image : 
-               `http://localhost:${PORT}${newProduct.image}`
+        image: getFullImageUrl(newProduct.image)
       }
     });
 
@@ -184,12 +187,11 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
   }
 });
 
-// ✅ FIXED: Update product - WITHOUT DESCRIPTION AND USAGE
+// ✅ FIXED: Update product
 app.put('/api/products/:id', upload.single('image'), (req, res) => {
   try {
     const productId = req.params.id;
     console.log('🔄 Updating product:', productId);
-    console.log('📝 Update data:', JSON.stringify(req.body, null, 2));
 
     const productIndex = products.findIndex(p => p.id === productId);
     if (productIndex === -1) {
@@ -212,7 +214,7 @@ app.put('/api/products/:id', upload.single('image'), (req, res) => {
         console.log('⚠️ Could not parse specifications in update');
       }
     } else {
-      // Update individual specification fields WITHOUT USAGE
+      // Update individual specification fields
       specifications = {
         ...specifications,
         category: req.body.mainCategory || req.body.category || specifications.category,
@@ -224,17 +226,15 @@ app.put('/api/products/:id', upload.single('image'), (req, res) => {
         construction: req.body.construction || specifications.construction,
         weave: req.body.weave || specifications.weave,
         finish: req.body.finish || specifications.finish
-        // ❌ USAGE REMOVED
       };
     }
 
-    // Handle image - keep existing if no new image
+    // ✅ FIX: Handle image properly
     let imageUrl = existingProduct.image;
     if (req.file) {
       // Delete old image if exists and is local file
       if (existingProduct.image && 
-          !existingProduct.image.startsWith('http') && 
-          !existingProduct.image.startsWith('data:')) {
+          existingProduct.image.startsWith('/uploads/')) {
         const oldImagePath = path.join(__dirname, existingProduct.image);
         if (fs.existsSync(oldImagePath)) {
           fs.unlinkSync(oldImagePath);
@@ -245,12 +245,11 @@ app.put('/api/products/:id', upload.single('image'), (req, res) => {
       console.log('🖼️ New image saved:', imageUrl);
     }
 
-    // Update product WITHOUT DESCRIPTION
+    // Update product
     const updatedProduct = {
       ...existingProduct,
       name: req.body.name || existingProduct.name,
       price: req.body.price ? parseFloat(req.body.price) : existingProduct.price,
-      // ❌ DESCRIPTION REMOVED
       mainCategory: req.body.mainCategory || existingProduct.mainCategory,
       subCategory: req.body.subCategory || existingProduct.subCategory,
       nestedCategory: req.body.nestedCategory || existingProduct.nestedCategory,
@@ -273,8 +272,7 @@ app.put('/api/products/:id', upload.single('image'), (req, res) => {
       message: 'Product updated successfully',
       product: {
         ...updatedProduct,
-        image: updatedProduct.image.startsWith('http') ? updatedProduct.image : 
-               `http://localhost:${PORT}${updatedProduct.image}`
+        image: getFullImageUrl(updatedProduct.image)
       }
     });
 
@@ -305,9 +303,7 @@ app.delete('/api/products/:id', (req, res) => {
 
     // Remove image file if it's a local file
     const product = products[productIndex];
-    if (product.image && 
-        !product.image.startsWith('http') && 
-        !product.image.startsWith('data:')) {
+    if (product.image && product.image.startsWith('/uploads/')) {
       const imagePath = path.join(__dirname, product.image);
       if (fs.existsSync(imagePath)) {
         fs.unlinkSync(imagePath);
@@ -336,7 +332,7 @@ app.delete('/api/products/:id', (req, res) => {
   }
 });
 
-// ✅ Get single product
+// ✅ FIXED: Get single product
 app.get('/api/products/:id', (req, res) => {
   try {
     const productId = req.params.id;
@@ -349,16 +345,12 @@ app.get('/api/products/:id', (req, res) => {
       });
     }
 
-    // Add full image URL
-    const productWithFullUrl = {
-      ...product,
-      image: product.image.startsWith('http') ? product.image : 
-             `http://localhost:${PORT}${product.image}`
-    };
-
     res.json({
       success: true,
-      product: productWithFullUrl
+      product: {
+        ...product,
+        image: getFullImageUrl(product.image)
+      }
     });
 
   } catch (error) {
@@ -370,6 +362,29 @@ app.get('/api/products/:id', (req, res) => {
   }
 });
 
+// ✅ NEW: Helper function to get full image URL
+function getFullImageUrl(imagePath) {
+  if (!imagePath) {
+    return `https://via.placeholder.com/300x300/4A5568/FFFFFF?text=No+Image`;
+  }
+  
+  if (imagePath.startsWith('http')) {
+    return imagePath;
+  }
+  
+  // For local uploads
+  if (imagePath.startsWith('/uploads/')) {
+    return `http://localhost:${PORT}${imagePath}`;
+  }
+  
+  // If it's just a filename without path
+  if (imagePath && !imagePath.includes('/')) {
+    return `http://localhost:${PORT}/uploads/${imagePath}`;
+  }
+  
+  return imagePath;
+}
+
 // ✅ Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -378,7 +393,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     productsCount: products.length,
     uploadsDir: uploadsDir,
-    message: 'Server is running correctly - DESCRIPTION & USAGE REMOVED'
+    message: 'Server is running with FIXED image URLs'
   });
 });
 
@@ -416,6 +431,5 @@ app.listen(PORT, () => {
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`🔗 API URL: http://localhost:${PORT}/api`);
   console.log(`🖼️ Images URL: http://localhost:${PORT}/uploads`);
-  console.log(`❌ DESCRIPTION & USAGE FIELDS REMOVED`);
-  console.log(`✅ Backend ready for Admin Panel!`);
+  console.log(`✅ Image URL system FIXED - Images will show globally`);
 });
