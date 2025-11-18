@@ -1,0 +1,56 @@
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# dotenv environment variables
+.env
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# DB
+*.sqlite
+*.db
+*.db-shm
+*.db-wal
+
+# Build output
+dist/
+build/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/
+.idea/
+
+# Optional npm cache
+.npm/
+
+# Render build caches
+.render/
+
+# Temporary folders
+tmp/
+temp/
+
+# TypeScript outputs (if you use TS)
+*.tsbuildinfo
+
