@@ -1,4 +1,4 @@
-// server.js - FIXED VERSION
+// server.js - COMPLETE FIXED VERSION
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -10,18 +10,14 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ✅ FIX: Serve static files correctly
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-  setHeaders: (res, path) => {
-    res.set('Access-Control-Allow-Origin', '*');
-  }
-}));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -65,12 +61,29 @@ const generateId = () => {
   return 'prod-' + Date.now().toString() + Math.round(Math.random() * 1000);
 };
 
-// ✅ FIXED: Get all products with proper image URLs
+// ✅ FIXED: Helper function to get full image URL
+function getFullImageUrl(imagePath) {
+  if (!imagePath) {
+    return `https://via.placeholder.com/300x300/4A5568/FFFFFF?text=No+Image`;
+  }
+  
+  if (imagePath.startsWith('http')) {
+    return imagePath;
+  }
+  
+  // For local uploads
+  if (imagePath.startsWith('/uploads/')) {
+    return `http://localhost:${PORT}${imagePath}`;
+  }
+  
+  return imagePath;
+}
+
+// ✅ FIXED: Get all products
 app.get('/api/products', (req, res) => {
   try {
     console.log('📦 Fetching products, total:', products.length);
     
-    // ✅ FIX: Properly format image URLs
     const productsWithFullUrls = products.map(product => ({
       ...product,
       image: getFullImageUrl(product.image)
@@ -94,35 +107,8 @@ app.get('/api/products', (req, res) => {
 app.post('/api/products', upload.single('image'), async (req, res) => {
   try {
     console.log('📨 Received product upload request');
-    console.log('📝 Body data:', JSON.stringify(req.body, null, 2));
+    console.log('📝 Body data:', req.body);
     console.log('🖼️ File received:', req.file);
-
-    // Parse specifications if sent as JSON string
-    let specifications = {};
-    if (req.body.specifications) {
-      try {
-        specifications = typeof req.body.specifications === 'string' 
-          ? JSON.parse(req.body.specifications) 
-          : req.body.specifications;
-      } catch (parseError) {
-        console.log('⚠️ Could not parse specifications, using individual fields');
-      }
-    }
-
-    // Use individual fields if specifications parsing failed
-    if (Object.keys(specifications).length === 0) {
-      specifications = {
-        category: req.body.mainCategory || req.body.category || '',
-        subCategory: req.body.subCategory || '',
-        composition: req.body.composition || '',
-        gsm: req.body.gsm || '',
-        width: req.body.width || '',
-        count: req.body.count || '',
-        construction: req.body.construction || '',
-        weave: req.body.weave || '',
-        finish: req.body.finish || ''
-      };
-    }
 
     // Required fields validation
     if (!req.body.name) {
@@ -132,14 +118,11 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
       });
     }
 
-    // ✅ FIX: Handle image URL properly
-    let imageUrl = '';
+    // Handle image URL
+    let imageUrl = 'https://via.placeholder.com/300x300/4A5568/FFFFFF?text=Product+Image';
     if (req.file) {
       imageUrl = `/uploads/${req.file.filename}`;
       console.log('🖼️ Image saved:', imageUrl);
-    } else {
-      // Use placeholder with full URL
-      imageUrl = `https://via.placeholder.com/300x300/4A5568/FFFFFF?text=Product+Image`;
     }
 
     // Create product object
@@ -147,12 +130,21 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
       id: generateId(),
       name: req.body.name.trim(),
       price: req.body.price ? parseFloat(req.body.price) : 0,
-      category: req.body.mainCategory || req.body.category || '',
-      mainCategory: req.body.mainCategory || req.body.category || '',
+      category: req.body.category || '',
+      mainCategory: req.body.mainCategory || '',
       subCategory: req.body.subCategory || '',
-      nestedCategory: req.body.nestedCategory || '',
       image: imageUrl,
-      specifications: specifications,
+      specifications: {
+        category: req.body.category || '',
+        subCategory: req.body.subCategory || '',
+        composition: req.body.composition || '',
+        gsm: req.body.gsm || '',
+        width: req.body.width || '',
+        count: req.body.count || '',
+        construction: req.body.construction || '',
+        weave: req.body.weave || '',
+        finish: req.body.finish || ''
+      },
       tags: req.body.tags ? 
         (typeof req.body.tags === 'string' ? 
           req.body.tags.split(',').map(tag => tag.trim()) : 
@@ -203,38 +195,11 @@ app.put('/api/products/:id', upload.single('image'), (req, res) => {
 
     const existingProduct = products[productIndex];
     
-    // Parse specifications if sent
-    let specifications = existingProduct.specifications;
-    if (req.body.specifications) {
-      try {
-        specifications = typeof req.body.specifications === 'string' 
-          ? JSON.parse(req.body.specifications) 
-          : req.body.specifications;
-      } catch (parseError) {
-        console.log('⚠️ Could not parse specifications in update');
-      }
-    } else {
-      // Update individual specification fields
-      specifications = {
-        ...specifications,
-        category: req.body.mainCategory || req.body.category || specifications.category,
-        subCategory: req.body.subCategory || specifications.subCategory,
-        composition: req.body.composition || specifications.composition,
-        gsm: req.body.gsm || specifications.gsm,
-        width: req.body.width || specifications.width,
-        count: req.body.count || specifications.count,
-        construction: req.body.construction || specifications.construction,
-        weave: req.body.weave || specifications.weave,
-        finish: req.body.finish || specifications.finish
-      };
-    }
-
-    // ✅ FIX: Handle image properly
+    // Handle image
     let imageUrl = existingProduct.image;
     if (req.file) {
       // Delete old image if exists and is local file
-      if (existingProduct.image && 
-          existingProduct.image.startsWith('/uploads/')) {
+      if (existingProduct.image && existingProduct.image.startsWith('/uploads/')) {
         const oldImagePath = path.join(__dirname, existingProduct.image);
         if (fs.existsSync(oldImagePath)) {
           fs.unlinkSync(oldImagePath);
@@ -250,11 +215,21 @@ app.put('/api/products/:id', upload.single('image'), (req, res) => {
       ...existingProduct,
       name: req.body.name || existingProduct.name,
       price: req.body.price ? parseFloat(req.body.price) : existingProduct.price,
+      category: req.body.category || existingProduct.category,
       mainCategory: req.body.mainCategory || existingProduct.mainCategory,
       subCategory: req.body.subCategory || existingProduct.subCategory,
-      nestedCategory: req.body.nestedCategory || existingProduct.nestedCategory,
       image: imageUrl,
-      specifications: specifications,
+      specifications: {
+        category: req.body.category || existingProduct.specifications.category,
+        subCategory: req.body.subCategory || existingProduct.specifications.subCategory,
+        composition: req.body.composition || existingProduct.specifications.composition,
+        gsm: req.body.gsm || existingProduct.specifications.gsm,
+        width: req.body.width || existingProduct.specifications.width,
+        count: req.body.count || existingProduct.specifications.count,
+        construction: req.body.construction || existingProduct.specifications.construction,
+        weave: req.body.weave || existingProduct.specifications.weave,
+        finish: req.body.finish || existingProduct.specifications.finish
+      },
       tags: req.body.tags ? 
         (typeof req.body.tags === 'string' ? 
           req.body.tags.split(',').map(tag => tag.trim()) : 
@@ -362,38 +337,31 @@ app.get('/api/products/:id', (req, res) => {
   }
 });
 
-// ✅ NEW: Helper function to get full image URL
-function getFullImageUrl(imagePath) {
-  if (!imagePath) {
-    return `https://via.placeholder.com/300x300/4A5568/FFFFFF?text=No+Image`;
-  }
-  
-  if (imagePath.startsWith('http')) {
-    return imagePath;
-  }
-  
-  // For local uploads
-  if (imagePath.startsWith('/uploads/')) {
-    return `http://localhost:${PORT}${imagePath}`;
-  }
-  
-  // If it's just a filename without path
-  if (imagePath && !imagePath.includes('/')) {
-    return `http://localhost:${PORT}/uploads/${imagePath}`;
-  }
-  
-  return imagePath;
-}
-
-// ✅ Health check
+// ✅ TEST ENDPOINT - Simple health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     success: true,
     status: 'OK', 
     timestamp: new Date().toISOString(),
     productsCount: products.length,
-    uploadsDir: uploadsDir,
-    message: 'Server is running with FIXED image URLs'
+    message: 'Server is running correctly!'
+  });
+});
+
+// ✅ ROOT ENDPOINT
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Fire Safety Products API Server',
+    endpoints: {
+      health: 'GET /api/health',
+      getAllProducts: 'GET /api/products',
+      getProduct: 'GET /api/products/:id',
+      createProduct: 'POST /api/products',
+      updateProduct: 'PUT /api/products/:id',
+      deleteProduct: 'DELETE /api/products/:id'
+    },
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -418,11 +386,22 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler - MUST BE LAST
 app.use('*', (req, res) => {
+  console.log('❌ 404 - Route not found:', req.originalUrl);
   res.status(404).json({
     success: false,
-    error: 'API endpoint not found'
+    error: 'API endpoint not found',
+    requestedUrl: req.originalUrl,
+    availableEndpoints: [
+      'GET /',
+      'GET /api/health',
+      'GET /api/products',
+      'GET /api/products/:id',
+      'POST /api/products',
+      'PUT /api/products/:id',
+      'DELETE /api/products/:id'
+    ]
   });
 });
 
@@ -431,5 +410,8 @@ app.listen(PORT, () => {
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`🔗 API URL: http://localhost:${PORT}/api`);
   console.log(`🖼️ Images URL: http://localhost:${PORT}/uploads`);
-  console.log(`✅ Image URL system FIXED - Images will show globally`);
+  console.log(`🌐 Test URLs:`);
+  console.log(`   → http://localhost:${PORT}/`);
+  console.log(`   → http://localhost:${PORT}/api/health`);
+  console.log(`   → http://localhost:${PORT}/api/products`);
 });
