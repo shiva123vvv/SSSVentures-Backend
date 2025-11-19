@@ -8,7 +8,34 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// -----------------------------
+// JSON PERSISTENCE STORAGE
+// -----------------------------
+const DATA_DIR = path.join(__dirname, "data");
+const DATA_FILE = path.join(DATA_DIR, "products.json");
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+
+let products = [];
+
+if (fs.existsSync(DATA_FILE)) {
+  try {
+    products = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    console.log(`📦 Loaded ${products.length} products from JSON file`);
+  } catch (err) {
+    console.error("❌ Failed to read products.json:", err);
+    products = [];
+  }
+}
+
+const saveProductsToFile = () => {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2));
+  console.log("💾 Products saved to products.json");
+};
+
+// -----------------------------
 // Middleware
+// -----------------------------
 app.use(
   cors({
     origin: [
@@ -21,284 +48,200 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Serve static uploads
+// -----------------------------
+// Static Uploads Folder
+// -----------------------------
 const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log("📁 Uploads directory created");
-}
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+
 app.use("/uploads", express.static(uploadsDir));
 
+// -----------------------------
 // Multer config
+// -----------------------------
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
+  destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const fileExtension = path.extname(file.originalname);
-    const safeFilename = "product-" + uniqueSuffix + fileExtension;
-    cb(null, safeFilename);
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "product-" + unique + path.extname(file.originalname));
   },
 });
 
 const upload = multer({
-  storage: storage,
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image files are allowed!"), false);
-    }
+  storage,
+  fileFilter(req, file, cb) {
+    if (!file.mimetype.startsWith("image/"))
+      return cb(new Error("Only images allowed"));
+    cb(null, true);
   },
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-  },
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-// In-memory products list
-let products = [];
+// -----------------------------
+// Helpers
+// -----------------------------
+const generateId = () =>
+  "prod-" + Date.now() + "-" + Math.floor(Math.random() * 10000);
 
-const generateId = () => {
-  return "prod-" + Date.now().toString() + Math.round(Math.random() * 1000);
+const getFullImageUrl = (imagePath) => {
+  if (!imagePath) return "";
+
+  if (imagePath.startsWith("http")) return imagePath;
+
+  return `${process.env.BACKEND_URL || "https://sssventures-backend.onrender.com"}${imagePath}`;
 };
 
-function getFullImageUrl(imagePath) {
-  if (!imagePath) {
-    return `https://via.placeholder.com/300x300/4A5568/FFFFFF?text=No+Image`;
-  }
-  if (imagePath.startsWith("http")) {
-    return imagePath;
-  }
-  if (imagePath.startsWith("/uploads/")) {
-    return `${process.env.BACKEND_URL || `http://localhost:${PORT}`}${imagePath}`;
-  }
-  return imagePath;
-}
+// -----------------------------
+// ROUTES
+// -----------------------------
 
-// ✅ Routes
+// GET all products
 app.get("/api/products", (req, res) => {
-  try {
-    console.log("📦 Fetching products, total:", products.length);
-    const productsWithFullUrls = products.map((product) => ({
-      ...product,
-      image: getFullImageUrl(product.image),
-    }));
-    res.json({ success: true, data: productsWithFullUrls, count: products.length });
-  } catch (error) {
-    console.error("❌ Error fetching products:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch products" });
-  }
+  const final = products.map((p) => ({
+    ...p,
+    image: getFullImageUrl(p.image),
+  }));
+  res.json({ success: true, data: final });
 });
 
+// CREATE product
 app.post("/api/products", upload.single("image"), (req, res) => {
   try {
-    console.log("📨 Received product upload request");
-    if (!req.body.name) {
-      return res.status(400).json({ success: false, error: "Product name is required" });
-    }
-    let imageUrl = "";
-    if (req.file) {
-      imageUrl = `/uploads/${req.file.filename}`;
-      console.log("🖼️ Image saved:", imageUrl);
-    }
     const newProduct = {
       id: generateId(),
-      name: (req.body.name || "").trim(),
-      price: req.body.price ? parseFloat(req.body.price) : 0,
+      name: req.body.name || "",
+      price: req.body.price || 0,
       category: req.body.category || "",
       mainCategory: req.body.mainCategory || "",
       subCategory: req.body.subCategory || "",
-      image: imageUrl,
-      specifications: {
-        category: req.body.category || "",
-        subCategory: req.body.subCategory || "",
-        composition: req.body.composition || "",
-        gsm: req.body.gsm || "",
-        width: req.body.width || "",
-        count: req.body.count || "",
-        construction: req.body.construction || "",
-        weave: req.body.weave || "",
-        finish: req.body.finish || "",
-      },
-      tags: req.body.tags
-        ? typeof req.body.tags === "string"
-          ? req.body.tags.split(",").map((t) => t.trim())
-          : req.body.tags
-        : [],
+      image: req.file ? `/uploads/${req.file.filename}` : "",
+      specifications: req.body.specifications
+        ? JSON.parse(req.body.specifications)
+        : {},
+      tags: req.body.tags ? req.body.tags.split(",") : [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      inStock: true,
     };
+
     products.push(newProduct);
-    console.log("✅ Product created successfully:", newProduct.id);
-    res.status(201).json({
+    saveProductsToFile();
+
+    res.json({
       success: true,
-      message: "Product uploaded successfully",
+      message: "Product created",
       product: {
         ...newProduct,
         image: getFullImageUrl(newProduct.image),
       },
     });
-  } catch (error) {
-    console.error("❌ Error uploading product:", error);
-    res.status(500).json({ success: false, error: "Failed to upload product", message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
+// UPDATE product
 app.put("/api/products/:id", upload.single("image"), (req, res) => {
-  try {
-    const id = req.params.id;
-    const index = products.findIndex((p) => p.id === id);
-    if (index === -1) {
-      return res.status(404).json({ success: false, error: "Product not found" });
-    }
-    const existing = products[index];
-    let newImage = existing.image;
-    if (req.file) {
-      if (existing.image && existing.image.startsWith("/uploads/")) {
-        const oldPath = path.join(__dirname, existing.image);
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-          console.log("🗑️ Old image deleted:", oldPath);
-        }
-      }
-      newImage = `/uploads/${req.file.filename}`;
-      console.log("🖼️ New image saved:", newImage);
-    }
-    const updatedProduct = {
-      ...existing,
-      name: req.body.name || existing.name,
-      price: req.body.price ? parseFloat(req.body.price) : existing.price,
-      category: req.body.category || existing.category,
-      mainCategory: req.body.mainCategory || existing.mainCategory,
-      subCategory: req.body.subCategory || existing.subCategory,
-      image: newImage,
-      specifications: {
-        category: req.body.category || existing.specifications.category,
-        subCategory: req.body.subCategory || existing.specifications.subCategory,
-        composition: req.body.composition || existing.specifications.composition,
-        gsm: req.body.gsm || existing.specifications.gsm,
-        width: req.body.width || existing.specifications.width,
-        count: req.body.count || existing.specifications.count,
-        construction: req.body.construction || existing.specifications.construction,
-        weave: req.body.weave || existing.specifications.weave,
-        finish: req.body.finish || existing.specifications.finish,
-      },
-      tags: req.body.tags
-        ? typeof req.body.tags === "string"
-          ? req.body.tags.split(",").map((t) => t.trim())
-          : req.body.tags
-        : existing.tags,
-      updatedAt: new Date().toISOString(),
-    };
-    products[index] = updatedProduct;
-    console.log("✅ Product updated successfully:", id);
-    res.json({ success: true, message: "Product updated successfully", product: { ...updatedProduct, image: getFullImageUrl(updatedProduct.image) } });
-  } catch (error) {
-    console.error("❌ Error updating product:", error);
-    res.status(500).json({ success: false, error: "Failed to update product", message: error.message });
-  }
-});
+  const id = req.params.id;
+  const index = products.findIndex((p) => p.id === id);
 
-app.delete("/api/products/:id", (req, res) => {
-  try {
-    const id = req.params.id;
-    const index = products.findIndex((p) => p.id === id);
-    if (index === -1) {
-      return res.status(404).json({ success: false, error: "Product not found" });
-    }
-    const prod = products[index];
+  if (index === -1)
+    return res.status(404).json({ success: false, error: "Product not found" });
+
+  let prod = products[index];
+
+  if (req.file) {
     if (prod.image && prod.image.startsWith("/uploads/")) {
-      const imgPath = path.join(__dirname, prod.image);
-      if (fs.existsSync(imgPath)) {
-        fs.unlinkSync(imgPath);
-        console.log("🗑️ Image file deleted:", imgPath);
-      }
+      const old = path.join(__dirname, prod.image);
+      if (fs.existsSync(old)) fs.unlinkSync(old);
     }
-    products.splice(index, 1);
-    console.log("✅ Product deleted successfully:", id);
-    res.json({ success: true, message: "Product deleted successfully", deletedId: id });
-  } catch (error) {
-    console.error("❌ Error deleting product:", error);
-    res.status(500).json({ success: false, error: "Failed to delete product", message: error.message });
+    prod.image = `/uploads/${req.file.filename}`;
   }
-});
 
-app.get("/api/products/:id", (req, res) => {
-  try {
-    const id = req.params.id;
-    const product = products.find((p) => p.id === id);
-    if (!product) {
-      return res.status(404).json({ success: false, error: "Product not found" });
-    }
-    res.json({ success: true, product: { ...product, image: getFullImageUrl(product.image) } });
-  } catch (error) {
-    console.error("Error fetching product:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch product" });
-  }
-});
+  prod = {
+    ...prod,
+    ...req.body,
+    specifications: req.body.specifications
+      ? JSON.parse(req.body.specifications)
+      : prod.specifications,
+    tags: req.body.tags ? req.body.tags.split(",") : prod.tags,
+    updatedAt: new Date().toISOString(),
+  };
 
-// Test / health endpoints
-app.get("/api/health", (req, res) => {
-  res.json({ success: true, status: "OK", timestamp: new Date().toISOString(), productsCount: products.length });
-});
-app.get("/api/test", (req, res) => {
-  res.json({ success: true, message: "API test ok!" });
-});
+  products[index] = prod;
+  saveProductsToFile();
 
-// Root endpoint
-app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "SSS Ventures API Server",
-    endpoints: {
-      health: "GET /api/health",
-      getAllProducts: "GET /api/products",
-      getProduct: "GET /api/products/:id",
-      createProduct: "POST /api/products",
-      updateProduct: "PUT /api/products/:id",
-      deleteProduct: "DELETE /api/products/:id",
-    },
-    timestamp: new Date().toISOString(),
+    product: { ...prod, image: getFullImageUrl(prod.image) },
   });
 });
 
-// Error handling
-app.use((error, req, res, next) => {
-  console.error("🚨 Server error:", error);
-  if (error instanceof multer.MulterError) {
-    if (error.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ success: false, error: "File too large", message: "File size must be less than 10MB" });
-    }
+// DELETE product
+app.delete("/api/products/:id", (req, res) => {
+  const id = req.params.id;
+  const index = products.findIndex((p) => p.id === id);
+
+  if (index === -1)
+    return res.status(404).json({ success: false, error: "Product not found" });
+
+  const prod = products[index];
+
+  if (prod.image && prod.image.startsWith("/uploads/")) {
+    const img = path.join(__dirname, prod.image);
+    if (fs.existsSync(img)) fs.unlinkSync(img);
   }
-  res.status(500).json({ success: false, error: "Server error", message: error.message });
+
+  products.splice(index, 1);
+  saveProductsToFile();
+
+  res.json({ success: true, deletedId: id });
 });
+
+// GET product by id
+app.get("/api/products/:id", (req, res) => {
+  const prod = products.find((p) => p.id === req.params.id);
+
+  if (!prod)
+    return res.status(404).json({ success: false, error: "Not found" });
+
+  res.json({
+    success: true,
+    product: { ...prod, image: getFullImageUrl(prod.image) },
+  });
+});
+
+// Health checks
+app.get("/api/health", (req, res) =>
+  res.json({
+    success: true,
+    status: "OK",
+    productsCount: products.length,
+    timestamp: new Date(),
+  })
+);
+
+app.get("/api/test", (req, res) =>
+  res.json({ success: true, message: "API test ok!" })
+);
+
+// Root
+app.get("/", (req, res) =>
+  res.json({ success: true, message: "SSS Ventures API running" })
+);
 
 // 404 handler
-app.use("*", (req, res) => {
-  console.log("❌ 404 - Route not found:", req.originalUrl);
+app.use("*", (req, res) =>
   res.status(404).json({
     success: false,
-    error: "API endpoint not found",
-    requestedUrl: req.originalUrl,
-    availableEndpoints: [
-      "GET /",
-      "GET /api/health",
-      "GET /api/test",
-      "GET /api/products",
-      "GET /api/products/:id",
-      "POST /api/products",
-      "PUT /api/products/:id",
-      "DELETE /api/products/:id",
-    ],
-  });
-});
+    error: "Route not found",
+    path: req.originalUrl,
+  })
+);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔗 API URL: http://localhost:${PORT}/api`);
-});
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
